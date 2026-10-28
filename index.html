@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpenBMC Image Builder — Part 2</title>
+<title>OpenBMC Image Builder — Form complete (build / QEMU still pending)</title>
 <style>
 body{font-family:system-ui,sans-serif;max-width:720px;margin:2em auto;padding:0 1em;line-height:1.5;color:var(--hatch-widget-text,inherit);background:transparent}
 label{display:block;margin:.8em 0 .2em;font-weight:600}
@@ -14,10 +14,11 @@ pre{background:var(--hatch-widget-surface-muted,#f4f4f4);color:var(--hatch-widge
 </style>
 </head>
 <body>
-<h1>OpenBMC Image Builder — Part 2</h1>
-<p class="note">Form → build spec → <code>local.conf</code> fragment.
-This part does <strong>not</strong> run a build and does <strong>not</strong> verify boot.
-It never asks for a password or a private key.</p>
+<h1>OpenBMC Image Builder — Form complete</h1>
+<p class="note">Form → build spec → <code>local.conf</code> fragment → next-steps checklist.
+This form does <strong>not</strong> run a build and does <strong>not</strong> verify boot.
+It never asks for a password or a private key, and it rejects a pasted key.</p>
+<p id="errors" class="warn"></p>
 
 <form id="f">
   <label for="machine">Machine (board)</label>
@@ -63,14 +64,22 @@ It never asks for a password or a private key.</p>
   <input id="sshKeyPath" placeholder="/path/to/id_ed25519.pub (optional)">
 
   <button type="button" id="gen">Generate spec + local.conf preview</button>
+  <button type="button" id="sample">Load sample (evb-ast2600)</button>
+  <button type="button" id="reset">Reset form</button>
 </form>
 
 <h2>Build spec (JSON)</h2>
 <pre id="specOut">—</pre>
 <button type="button" id="dlSpec">Download spec JSON</button>
+<button type="button" id="copySpec">Copy spec JSON</button>
 
 <h2>local.conf fragment preview</h2>
 <pre id="confOut">—</pre>
+<button type="button" id="dlConf">Download local.conf fragment</button>
+<button type="button" id="copyConf">Copy fragment</button>
+
+<h2>Next steps (checklist — not done by this form)</h2>
+<pre id="stepsOut">Generate a spec first.</pre>
 <p class="note">Part 2: MACHINE and services are real assignments (see part2-mapping.md).
 Hostname and network are runtime configuration, not local.conf assignments:
 no such variable was found in either tree, so they are recorded as
@@ -116,19 +125,67 @@ function fragment(s) {
   out += `# NOT DONE in Part 2: real bitbake build, QEMU boot run, service-removal verification, layer-drift maintenance, hostname/network runtime provisioning automation.\n`;
   return out;
 }
-let lastSpec = null;
+function validate(s) {
+  const errs = [];
+  if (!s.machine) errs.push('Enter a machine name.');
+  if (s.hostname && !/^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(s.hostname)) errs.push('Hostname must be letters, digits, or hyphens, and must not start with a hyphen.');
+  const ipv4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)){3}$/;
+  if (s.network.mode === 'static') {
+    if (!ipv4.test(s.network.static_ip || '')) errs.push('Static IP is not a valid IPv4 address.');
+    if (!ipv4.test(s.network.gateway || '')) errs.push('Gateway is not a valid IPv4 address.');
+  }
+  const k = s.ssh_public_key_path || '';
+  if (/ssh-|BEGIN |PRIVATE|-----/.test(k)) errs.push('SSH field takes a file path only (e.g. /path/to/id_ed25519.pub) — never paste a key, and never a private key.');
+  else if (k && !k.endsWith('.pub')) errs.push('SSH public-key path should end with .pub (a path reference, not a key).');
+  return errs;
+}
+function nextSteps(s) {
+  const lines = [
+    '1. Save the fragment as local.conf (or merge its MACHINE / IMAGE_FEATURES lines into your build directory local.conf).',
+    '2. Run a real build: bitbake obmc-phosphor-image  (not run by this form; build time is multi-hour, machine-dependent).',
+    '3. After the build, pick the matching file from tmp/deploy/images/' + s.machine + '/ for your image_artifact_kind (' + s.image_artifact_kind + ').',
+  ];
+  if (s.machine === 'evb-ast2600') lines.push('4. QEMU (EVB model only, not yet run): qemu-system-arm -m 1G -M ast2600-evb -drive file=<your>.static.mtd,format=raw,if=mtd -nographic  — see qemu-boot-verification-draft.md for its 10 checkpoints.');
+  else if (s.machine === 'ast2700-dcscm') lines.push('4. QEMU: NO ast2700-dcscm QEMU machine exists in this project, so QEMU cannot verify the DC-SCM board or its PFR capsule. Do not substitute ast2700-evb and call it DC-SCM verification.');
+  else lines.push('4. QEMU: no QEMU machine is verified for this machine in this project. Do not invent one; check the QEMU machine list for your SoC/board first.');
+  lines.push('5. After first boot, apply hostname / network via phosphor-networkd (Redfish / D-Bus), and deliver the SSH public key post-boot — neither is a local.conf assignment.');
+  lines.push('6. Do NOT ship a deselected service as removed until service-removal is verified with a real build.');
+  return lines.join('\n');
+}
+function download(name, text, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], {type: type}));
+  a.download = name; a.click();
+}
+let lastSpec = null, lastFrag = '';
 $('gen').onclick = () => {
   lastSpec = spec();
-  if (!lastSpec.machine) { alert('Enter a machine name.'); return; }
+  const errs = validate(lastSpec);
+  $('errors').textContent = errs.join(' ');
+  if (errs.length) return;
+  lastFrag = fragment(lastSpec);
   $('specOut').textContent = JSON.stringify(lastSpec, null, 2);
-  $('confOut').textContent = fragment(lastSpec);
+  $('confOut').textContent = lastFrag;
+  $('stepsOut').textContent = nextSteps(lastSpec);
 };
 $('dlSpec').onclick = () => {
   if (!lastSpec) { alert('Generate the spec first.'); return; }
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(lastSpec, null, 2)], {type: 'application/json'}));
-  a.download = 'openbmc-build-spec.json'; a.click();
+  download('openbmc-build-spec.json', JSON.stringify(lastSpec, null, 2), 'application/json');
 };
+$('dlConf').onclick = () => {
+  if (!lastFrag) { alert('Generate the spec first.'); return; }
+  download('local.conf.fragment', lastFrag, 'text/plain');
+};
+$('copySpec').onclick = async () => { if (lastSpec) await navigator.clipboard.writeText(JSON.stringify(lastSpec, null, 2)); };
+$('copyConf').onclick = async () => { if (lastFrag) await navigator.clipboard.writeText(lastFrag); };
+$('sample').onclick = () => {
+  $('machine').value = 'evb-ast2600'; $('otherWrap').style.display = 'none';
+  $('imageKind').value = 'static.mtd'; $('hostname').value = 'openbmc';
+  $('netMode').value = 'dhcp'; $('staticWrap').style.display = 'none';
+  document.querySelectorAll('.svc').forEach(c => c.checked = true);
+  $('sshKeyPath').value = ''; $('gen').click();
+};
+$('reset').onclick = () => { document.getElementById('f').reset(); $('otherWrap').style.display = 'none'; $('staticWrap').style.display = 'none'; $('specOut').textContent = '—'; $('confOut').textContent = '—'; $('stepsOut').textContent = 'Generate a spec first.'; $('errors').textContent = ''; lastSpec = null; lastFrag = ''; };
 </script>
 </body>
 </html>

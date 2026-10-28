@@ -75,6 +75,21 @@ def main():
     out2 = run(other)
     assert "WARNING" in out2, out2
 
+    # Form-completion validation: pasted keys and bad IPs are rejected.
+    for bad in (
+        dict(base, ssh_public_key_path="ssh-ed25519 AAAA..."),
+        dict(base, ssh_public_key_path="/home/user/id_ed25519"),
+        dict(base, network={"mode": "static", "static_ip": "999.1.1.1", "gateway": "192.168.1.1"}),
+        dict(base, hostname="-bad-host"),
+    ):
+        bad_path = Path("/tmp/openbmc-spec-bad.json")
+        bad_path.write_text(json.dumps(bad), encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "generate_local_conf.py"), str(bad_path)],
+            capture_output=True, text=True,
+        )
+        assert proc.returncode != 0, bad
+
     print("Part 2 generator checks passed.")
 
 

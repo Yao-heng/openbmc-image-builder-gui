@@ -46,6 +46,30 @@ for one EVB machine does not guarantee the same result on a different
 board. The QEMU step proves the build-and-boot process for the EVB
 model; board-specific bring-up remains board-specific work.
 
+## Form completion (2026-10-28) — what the form now does, end to end
+
+The form itself is now complete as far as it can be without a real build:
+- Download **and** copy for both the spec JSON and the `local.conf` fragment
+  (previously only the spec could be downloaded; the fragment was preview-only).
+- Inline validation, in both the browser form and `generate_local_conf.py`:
+  hostname format, static IPv4 address / gateway, and SSH key handling —
+  a pasted key (or a non-`.pub` path) is rejected, never silently accepted.
+- A **Load sample** button (evb-ast2600, all services) and a **Reset** button,
+  so a junior engineer can see a working spec in one click.
+- A **next-steps checklist** generated from the chosen machine: where the
+  fragment goes, the `bitbake obmc-phosphor-image` command, where to pick
+  the artifact from `tmp/deploy/images/<machine>/`, and the correct QEMU
+  branch — ast2600-evb for evb-ast2600, no QEMU machine for ast2700-dcscm,
+  and no invented QEMU machine for any other machine.
+- Hostname / network / SSH key delivery remain post-boot runtime steps,
+  and deselected services remain un-removed, with warnings — the form does
+  not pretend those are solved.
+
+Still **not** done, and not claimed: a real `bitbake` build, a real QEMU
+boot run with a dated log, service-removal verification, and on-hardware
+verification. Those are the Next 30 days items above, after return on
+2026-11-02.
+
 ## What Part 1 does
 
 1. An engineer fills in the form in `index.html` (no server, no install:

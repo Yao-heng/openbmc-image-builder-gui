@@ -50,7 +50,33 @@ SERVICE_FEATURES = {
 ALL_SERVICES = ["redfish", "ipmi", "ssh", "webui"]
 
 
+def validate_spec(spec: dict) -> None:
+    """Reject inputs the form must never accept, without inventing data.
+
+    A pasted key is never a path reference; an invalid static IP or
+    hostname is caught here, not at build time.
+    """
+    import re
+
+    key = spec.get("ssh_public_key_path") or ""
+    if key and ("ssh-" in key or "BEGIN" in key or "PRIVATE" in key or "-----" in key):
+        raise ValueError("ssh_public_key_path must be a file path, never a pasted key")
+    if key and not key.endswith(".pub"):
+        raise ValueError("ssh_public_key_path should end with .pub")
+    hostname = spec.get("hostname") or ""
+    if hostname and not re.match(r"^[A-Za-z0-9][A-Za-z0-9-]{0,62}$", hostname):
+        raise ValueError("hostname is invalid")
+    net = spec.get("network") or {}
+    if net.get("mode") == "static":
+        ipv4 = r"^(25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)){3}$"
+        if not re.match(ipv4, net.get("static_ip") or ""):
+            raise ValueError("static_ip is not a valid IPv4 address")
+        if not re.match(ipv4, net.get("gateway") or ""):
+            raise ValueError("gateway is not a valid IPv4 address")
+
+
 def fragment(spec: dict) -> str:
+    validate_spec(spec)
     machine = (spec.get("machine") or "").strip()
     if not machine:
         raise ValueError("spec is missing a machine name")
