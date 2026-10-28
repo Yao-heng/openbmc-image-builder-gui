@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenBMC Image Builder — Part 2</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:720px;margin:2em auto;padding:0 1em;line-height:1.5;color:var(--hatch-widget-text,inherit);background:transparent}
+label{display:block;margin:.8em 0 .2em;font-weight:600}
+input,select{width:100%;padding:.4em;box-sizing:border-box;background:var(--hatch-widget-surface,#fff);color:var(--hatch-widget-text,inherit);border:1px solid var(--hatch-widget-border,#ccc)}
+fieldset{margin:1em 0;border:1px solid var(--hatch-widget-border,#ccc)}button{padding:.6em 1.2em;margin-top:1em;background:var(--hatch-widget-surface,#eee);color:var(--hatch-widget-text,inherit);border:1px solid var(--hatch-widget-border,#ccc);cursor:pointer;transition:transform .05s ease,filter .05s ease}button:active{transform:translateY(1px) scale(.98);filter:brightness(.85)}
+pre{background:var(--hatch-widget-surface-muted,#f4f4f4);color:var(--hatch-widget-text,#111);padding:1em;white-space:pre-wrap;word-break:break-all}
+.warn{color:var(--hatch-widget-accent,#8a5a00)}.note{color:var(--hatch-widget-muted,#555);font-size:.9em}
+</style>
+</head>
+<body>
+<h1>OpenBMC Image Builder — Part 2</h1>
+<p class="note">Form → build spec → <code>local.conf</code> fragment.
+This part does <strong>not</strong> run a build and does <strong>not</strong> verify boot.
+It never asks for a password or a private key.</p>
+
+<form id="f">
+  <label for="machine">Machine (board)</label>
+  <select id="machine">
+    <option value="evb-ast2600">evb-ast2600 (verified preset)</option>
+    <option value="evb-ast2500">evb-ast2500 (verified preset)</option>
+    <option value="ast2700-dcscm">ast2700-dcscm (verified preset, ASPEED SDK tree)</option>
+    <option value="other">Other — type the exact machine name</option>
+  </select>
+  <div id="otherWrap" style="display:none">
+    <label for="machineOther">Other machine name</label>
+    <input id="machineOther" placeholder="e.g. only if a matching machine conf exists in your layer">
+    <p class="warn">Warning: non-preset machines are not verified against a machine conf here. Confirm one exists before building.</p>
+  </div>
+
+  <label for="imageKind">Image artifact kind</label>
+  <select id="imageKind">
+    <option value="static.mtd">Full flash image (.static.mtd)</option>
+    <option value="tar">Update image (.tar)</option>
+  </select>
+
+  <label for="hostname">Hostname</label>
+  <input id="hostname" value="openbmc">
+
+  <label for="netMode">Network</label>
+  <select id="netMode">
+    <option value="dhcp">DHCP</option>
+    <option value="static">Static IP</option>
+  </select>
+  <div id="staticWrap" style="display:none">
+    <label for="ip">Static IP</label><input id="ip" placeholder="192.168.1.10">
+    <label for="gateway">Gateway</label><input id="gateway" placeholder="192.168.1.1">
+  </div>
+
+  <fieldset><legend>Requested services (recorded in the spec; Yocto mapping is Part 2)</legend>
+    <label><input type="checkbox" class="svc" value="redfish" checked> Redfish</label>
+    <label><input type="checkbox" class="svc" value="ipmi" checked> IPMI</label>
+    <label><input type="checkbox" class="svc" value="ssh" checked> SSH</label>
+    <label><input type="checkbox" class="svc" value="webui" checked> Web UI</label>
+  </fieldset>
+
+  <label for="sshKeyPath">SSH public-key file path (reference only — never paste a key here)</label>
+  <input id="sshKeyPath" placeholder="/path/to/id_ed25519.pub (optional)">
+
+  <button type="button" id="gen">Generate spec + local.conf preview</button>
+</form>
+
+<h2>Build spec (JSON)</h2>
+<pre id="specOut">—</pre>
+<button type="button" id="dlSpec">Download spec JSON</button>
+
+<h2>local.conf fragment preview</h2>
+<pre id="confOut">—</pre>
+<p class="note">Part 2: MACHINE and services are real assignments (see part2-mapping.md).
+Hostname and network are runtime configuration, not local.conf assignments:
+no such variable was found in either tree, so they are recorded as
+commented runtime notes only. Deselecting a service does not remove it;
+the removal mapping is unpinned and a WARNING is emitted instead.</p>
+
+<script>
+const $ = id => document.getElementById(id);
+$('machine').onchange = () => { $('otherWrap').style.display = $('machine').value === 'other' ? 'block' : 'none'; };
+$('netMode').onchange = () => { $('staticWrap').style.display = $('netMode').value === 'static' ? 'block' : 'none'; };
+function spec() {
+  const machine = $('machine').value === 'other' ? $('machineOther').value.trim() : $('machine').value;
+  return {
+    schema: "openbmc-image-builder-spec/v1",
+    machine: machine,
+    machine_verified_preset: ['evb-ast2500', 'evb-ast2600', 'ast2700-dcscm'].includes(machine),
+    image_artifact_kind: $('imageKind').value,
+    hostname: $('hostname').value.trim(),
+    network: { mode: $('netMode').value,
+      static_ip: $('netMode').value === 'static' ? $('ip').value.trim() : null,
+      gateway: $('netMode').value === 'static' ? $('gateway').value.trim() : null },
+    requested_services: [...document.querySelectorAll('.svc:checked')].map(c => c.value),
+    ssh_public_key_path: $('sshKeyPath').value.trim() || null,
+    part1_note: "Generates a local.conf fragment only. Does not build or boot-verify."
+  };
+}
+function fragment(s) {
+  const FEATURES = { redfish: ['obmc-bmcweb'], ipmi: ['obmc-net-ipmi', 'obmc-host-ipmi'], ssh: ['ssh-server-dropbear'], webui: ['obmc-webui'] };
+  const ALL = ['redfish', 'ipmi', 'ssh', 'webui'];
+  let out = `# OpenBMC build fragment — generated by Part 2 GUI (spec v1)\n# Pinned mappings are in part2-mapping.md; unpinned items stay commented, never invented.\nMACHINE = "${s.machine}"\n`;
+  if (!s.machine_verified_preset) out += `# WARNING: machine is not a verified preset in the fetched tree. Confirm a matching machine conf exists.\n`;
+  const feats = [];
+  ALL.forEach(svc => { if (s.requested_services.includes(svc)) feats.push(...FEATURES[svc]); });
+  if (feats.length) out += `IMAGE_FEATURES:append = " ${feats.join(' ')} "\n`;
+  out += `# NOTE: the services above are already in the default obmc-phosphor-image IMAGE_FEATURES; this append makes the selection explicit for a custom image recipe.\n`;
+  const deselected = ALL.filter(svc => !s.requested_services.includes(svc));
+  if (deselected.length) out += `# WARNING: deselected service(s) ${deselected.join(', ')} are NOT removed by this fragment. The removal mapping is unpinned, and the default obmc-phosphor-image would still include them. Do not ship this fragment as a service-excluded image until removal is verified with a real build.\n`;
+  out += `# RUNTIME (not a build setting): hostname = ${s.hostname} — set after first boot via phosphor-networkd (Redfish / D-Bus xyz.openbmc_project.Network). No local.conf hostname variable was found in either tree.\n`;
+  out += `# RUNTIME (not a build setting): network mode = ${s.network.mode}` +
+    (s.network.mode === 'static' ? `, static_ip = ${s.network.static_ip}, gateway = ${s.network.gateway}` : '') + ` — apply after first boot via phosphor-networkd; no local.conf DHCP/static-IP variable was found in either tree. For a reproducible fleet setting, ship a systemd .network file in a custom layer (future work, not generated here).\n`;
+  out += `# ARTIFACT (downstream use only): image_artifact_kind = ${s.image_artifact_kind} — upstream static.inc produces mtd-static / mtd-static-tar / mtd-static-alltar; pick the matching file from tmp/deploy/images/<machine>/ after the build.\n`;
+  if (s.ssh_public_key_path) out += `# TODO (key provisioning, post-boot): SSH public key path reference = ${s.ssh_public_key_path} (never a pasted key, never a private key). No build-time authorized-key variable was found in either tree.\n`;
+  out += `# NOT DONE in Part 2: real bitbake build, QEMU boot run, service-removal verification, layer-drift maintenance, hostname/network runtime provisioning automation.\n`;
+  return out;
+}
+let lastSpec = null;
+$('gen').onclick = () => {
+  lastSpec = spec();
+  if (!lastSpec.machine) { alert('Enter a machine name.'); return; }
+  $('specOut').textContent = JSON.stringify(lastSpec, null, 2);
+  $('confOut').textContent = fragment(lastSpec);
+};
+$('dlSpec').onclick = () => {
+  if (!lastSpec) { alert('Generate the spec first.'); return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(lastSpec, null, 2)], {type: 'application/json'}));
+  a.download = 'openbmc-build-spec.json'; a.click();
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+{"hostname":"openbmc","image_artifact_kind":"static.mtd","machine":"evb-ast2600","machine_verified_preset":true,"network":{"gateway":null,"mode":"dhcp","static_ip":null},"part1_note":"Generates a local.conf fragment only. Does not build or boot-verify.","requested_services":["redfish","ipmi","ssh","webui"],"schema":"openbmc-image-builder-spec/v1","ssh_public_key_path":null}
