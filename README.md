@@ -1,10 +1,19 @@
 # OpenBMC Image Builder GUI — Part 2
 
-A form that turns the must-have build inputs into a build spec and a
-`local.conf` fragment. Part 1 (2026-10-26) built the GUI first; Part 2
+## Purpose
+
+For junior engineers, and to speed up a company's project launch with
+OpenBMC: a form that turns the must-have build inputs into a build spec
+and a `local.conf` fragment, so a newcomer to OpenBMC / Yocto does not
+have to hand-edit Yocto settings to get to a first build. The goal is a
+shorter path from "we need a BMC image" to "we have a buildable spec",
+not a claim that any launch time has already been measured — no full
+`bitbake` build has been run yet, and no boot has been verified (see
+"Part 2 progress" below).
+
+Part 1 (2026-10-26) built the GUI first; Part 2
 pins the Yocto mappings against the fetched trees, and writes the
-verification and operations drafts. No full `bitbake` build has been
-run yet, and no boot has been verified — see "Part 2 progress" below.
+verification and operations drafts.
 
 ## Status — ongoing, and next 30 days (as of 2026-10-28)
 
